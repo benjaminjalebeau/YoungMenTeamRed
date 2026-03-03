@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Canvas Game — Template</title>
+  <style>
+    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#111;color:#eee}
+    .wrap{display:flex;align-items:center;justify-content:center;height:100%}
+    canvas{background:#0b0b0f;border:6px solid #222;box-shadow:0 6px 20px rgba(0,0,0,.6)}
+    .hud{position:fixed;left:16px;top:16px;color:#ddd}
+    button{margin-left:8px;padding:6px 10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="800" height="500"></canvas>
+  </div>
+  <div class="hud">
+    <span id="score">Score: 0</span>
+    <span id="time" style="margin-left:12px">Time: 60</span>
+    <button id="start">Start</button>
+    <button id="restart">Restart</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const timeEl = document.getElementById('time');
+    const startBtn = document.getElementById('start');
+    const restartBtn = document.getElementById('restart');
+
+    const W = canvas.width, H = canvas.height;
+
+    const KEYS = {};
+    addEventListener('keydown', e => KEYS[e.key.toLowerCase()] = true);
+    addEventListener('keyup', e => KEYS[e.key.toLowerCase()] = false);
+
+    function rand(min, max){ return Math.random()*(max-min)+min }
+
+    const game = {
+      running:false,
+      time:60,
+      score:0,
+      player:{x:W/2,y:H/2,r:14,spd:220},
+      items:[],
+      lastSpawn:0
+    };
+
+    function reset(){
+      game.time = 60;
+      game.score = 0;
+      game.player.x = W/2; game.player.y = H/2;
+      game.items = [];
+      game.lastSpawn = 0;
+      updateHUD();
+      draw();
+    }
+
+    function start(){ game.running = true; game.lastTime = performance.now(); loop(game.lastTime); }
+    function stop(){ game.running = false; }
+
+    function spawnItem(){
+      const size = 12;
+      const margin = 20;
+      const x = rand(margin, W-margin-size);
+      const y = rand(margin+40, H-margin-size);
+      game.items.push({x,y,size,angle:0});
+    }
+
+    function updateHUD(){
+      scoreEl.textContent = 'Score: ' + game.score;
+      timeEl.textContent = 'Time: ' + Math.max(0, Math.floor(game.time));
+    }
+
+    function update(dt){
+      // player movement (arrow keys or WASD)
+      let dx = 0, dy = 0;
+      if (KEYS['arrowleft'] || KEYS['a']) dx -= 1;
+      if (KEYS['arrowright'] || KEYS['d']) dx += 1;
+      if (KEYS['arrowup'] || KEYS['w']) dy -= 1;
+      if (KEYS['arrowdown'] || KEYS['s']) dy += 1;
+      const len = Math.hypot(dx,dy) || 1;
+      game.player.x += (dx/len) * game.player.spd * dt;
+      game.player.y += (dy/len) * game.player.spd * dt;
+      // clamp
+      game.player.x = Math.max(game.player.r, Math.min(W-game.player.r, game.player.x));
+      game.player.y = Math.max(game.player.r, Math.min(H-game.player.r, game.player.y));
+
+      // spawn items occasionally
+      game.lastSpawn += dt;
+      if (game.lastSpawn > 1.2){ spawnItem(); game.lastSpawn = 0 }
+
+      // rotate items
+      for (const it of game.items) it.angle += dt * 3;
+
+      // check collisions
+      for (let i = game.items.length-1; i >= 0; i--){
+        const it = game.items[i];
+        const dist = Math.hypot(it.x - game.player.x, it.y - game.player.y);
+        if (dist < game.player.r + it.size/2){
+          game.items.splice(i,1);
+          game.score += 1;
+        }
+      }
+
+      // timer
+      game.time -= dt;
+      if (game.time <= 0){ stop(); }
+
+      updateHUD();
+    }
+
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      // background grid
+      ctx.fillStyle = '#071028';
+      ctx.fillRect(0,0,W,H);
+
+      // items
+      for (const it of game.items){
+        ctx.save();
+        ctx.translate(it.x + it.size/2, it.y + it.size/2);
+        ctx.rotate(it.angle);
+        ctx.fillStyle = '#f4c542';
+        ctx.fillRect(-it.size/2, -it.size/2, it.size, it.size);
+        ctx.restore();
+      }
+
+      // player
+      ctx.beginPath();
+      ctx.fillStyle = '#66e0a3';
+      ctx.arc(game.player.x, game.player.y, game.player.r, 0, Math.PI*2);
+      ctx.fill();
+
+      // simple instructions
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillRect(8,8,200,36);
+      ctx.fillStyle = '#ddd';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('Move: arrows / WASD — collect squares', 14, 30);
+
+      if (!game.running){
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, H/2-40, W, 80);
+        ctx.fillStyle = '#fff';
+        ctx.font = '28px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Press Start to play', W/2, H/2+8);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    function loop(now){
+      if (!game.running) return draw();
+      const dt = (now - game.lastTime) / 1000;
+      game.lastTime = now;
+      update(dt);
+      draw();
+      if (game.running) requestAnimationFrame(loop);
+      else draw();
+    }
+
+    startBtn.addEventListener('click', ()=>{
+      reset();
+      start();
+    });
+    restartBtn.addEventListener('click', ()=>{
+      reset();
+      start();
+    });
+
+    // initial
+    reset();
+    draw();
+  </script>
+</body>
+</html>
