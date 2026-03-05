@@ -3,177 +3,920 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Canvas Game — Template</title>
+  <title>Ninja: Fruit Dungeon</title>
   <style>
-    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#111;color:#eee}
-    .wrap{display:flex;align-items:center;justify-content:center;height:100%}
-    canvas{background:#0b0b0f;border:6px solid #222;box-shadow:0 6px 20px rgba(0,0,0,.6)}
-    .hud{position:fixed;left:16px;top:16px;color:#ddd}
-    button{margin-left:8px;padding:6px 10px}
+    html,body { height:100%; margin:0; background:#000; display:flex; align-items:center; justify-content:center; overflow:hidden; font-family:Arial,sans-serif; }
+    canvas { display:block; cursor:crosshair; }
+    #hud { position:fixed; top:0; left:0; right:0; padding:8px 14px; display:flex; justify-content:space-between; align-items:center; pointer-events:none; background:linear-gradient(rgba(0,0,0,0.8),transparent); gap:10px; flex-wrap:wrap; }
+    .hi { color:#eee; font-size:13px; display:flex; align-items:center; gap:5px; }
+    #hpBar { width:100px; height:12px; background:#333; border-radius:6px; overflow:hidden; }
+    #hpFill { height:100%; background:#e23; border-radius:6px; transition:width .1s; }
+    #crosshair { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:24px; line-height:1; pointer-events:none; text-shadow:0 0 5px #000; }
+    #controls { position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,0.28); font-size:11px; pointer-events:none; white-space:nowrap; }
+    #overlay { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; background:rgba(0,0,0,0.85); color:#fff; text-align:center; }
+    #overlay h1 { font-size:44px; margin:0 0 10px; }
+    #overlay p  { font-size:15px; color:#bbb; margin:0 0 24px; white-space:pre-line; line-height:1.7; }
+    #overlay button { padding:10px 30px; font-size:15px; background:#222; color:#fff; border:2px solid #555; border-radius:4px; cursor:pointer; }
+    #overlay button:hover { background:#444; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <canvas id="game" width="800" height="500"></canvas>
+  <canvas id="game" width="800" height="500"></canvas>
+
+  <div id="hud">
+    <div class="hi">HP <div id="hpBar"><div id="hpFill"></div></div></div>
+    <div class="hi" id="weaponEl">Weapon: Katana</div>
+    <div class="hi" id="keysEl">Keys: 0 / 3</div>
+    <div class="hi" id="slainEl">Slain: 0</div>
+    <div class="hi" id="leftEl">Fruits: 6</div>
   </div>
-  <div class="hud">
-    <span id="score">Score: 0</span>
-    <span id="time" style="margin-left:12px">Time: 60</span>
-    <button id="start">Start</button>
-    <button id="restart">Restart</button>
+
+  <div id="crosshair">+</div>
+  <div id="controls">W/S: Move &nbsp;|&nbsp; A/D: Strafe &nbsp;|&nbsp; ←→: Turn &nbsp;|&nbsp; SPACE / Click: Attack &nbsp;|&nbsp; M: Music &nbsp;|&nbsp; Collect 3 keys, find EXIT!</div>
+
+  <div id="overlay">
+    <h1 id="oTitle"></h1>
+    <p  id="oMsg"></p>
+    <button id="oBtn">Play Again</button>
   </div>
 
   <script>
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
-    const scoreEl = document.getElementById('score');
-    const timeEl = document.getElementById('time');
-    const startBtn = document.getElementById('start');
-    const restartBtn = document.getElementById('restart');
-
+    const canvas  = document.getElementById('game');
+    const ctx     = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
 
-    const KEYS = {};
-    addEventListener('keydown', e => KEYS[e.key.toLowerCase()] = true);
-    addEventListener('keyup', e => KEYS[e.key.toLowerCase()] = false);
+    const hpFill  = document.getElementById('hpFill');
+    const weaponEl= document.getElementById('weaponEl');
+    const keysEl  = document.getElementById('keysEl');
+    const slainEl = document.getElementById('slainEl');
+    const leftEl  = document.getElementById('leftEl');
+    const overlay = document.getElementById('overlay');
+    const oTitle  = document.getElementById('oTitle');
+    const oMsg    = document.getElementById('oMsg');
 
-    function rand(min, max){ return Math.random()*(max-min)+min }
+    // ── MAP  (0=floor  1=wall  2=exit  3=locked door) ───────────────────────
+    const MAP = [
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1],
+      [1,0,1,0,1,0,1,1,0,1,1,0,1,0,1,1],
+      [1,0,1,0,0,0,1,0,0,0,1,0,0,0,0,1],
+      [1,0,1,1,1,0,1,0,1,0,1,1,1,1,0,1],
+      [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1],
+      [1,1,1,0,1,1,1,0,1,0,1,1,0,1,1,1],
+      [1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+      [1,0,1,1,1,0,1,1,1,1,0,1,0,1,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1],
+      [1,1,1,0,1,1,0,1,1,1,1,0,1,1,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,1,1,1,0,1,1,0,1,1,1,0,1,0,1],
+      [1,0,1,0,0,0,0,1,0,0,0,0,0,1,0,1],
+      [1,0,0,0,1,0,0,0,0,0,1,0,0,3,2,1],
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    ];
+    const MW = 16, MH = 16;
+    let doorOpen = false;
 
-    const game = {
-      running:false,
-      time:60,
-      score:0,
-      player:{x:W/2,y:H/2,r:14,spd:220},
-      items:[],
-      lastSpawn:0
+    function tileAt(x, y) {
+      const mx = Math.floor(x), my = Math.floor(y);
+      if (mx < 0 || mx >= MW || my < 0 || my >= MH) return 1;
+      return MAP[my][mx];
+    }
+    function solid(x, y) {
+      const t = tileAt(x, y);
+      return t === 1 || (t === 3 && !doorOpen);
+    }
+
+    // ── WEAPONS ──────────────────────────────────────────────────────────────
+    const WEAPONS = {
+      katana:      { name:'Katana',       cd:0.45, dmg:1, range:1.7, cone:0.45 },
+      twinBlades:  { name:'Twin Blades',  cd:0.20, dmg:1, range:2.0, cone:0.30 },
+      fireSword:   { name:'Fire Sword',   cd:0.50, dmg:3, range:2.2, cone:0.40 },
+      shuriken:    { name:'Shuriken',     cd:0.30, dmg:1, range:7.0, cone:0.97 },
     };
 
-    function reset(){
-      game.time = 60;
-      game.score = 0;
-      game.player.x = W/2; game.player.y = H/2;
-      game.items = [];
-      game.lastSpawn = 0;
+    // ── ZONE WALL COLORS (4 quadrants) ───────────────────────────────────────
+    // [r, g, b] base color for each zone
+    const ZONE_COLORS = [
+      [30,  60, 130],  // TL: cold blue stone
+      [130, 30,  30],  // TR: blood red brick
+      [30, 100,  50],  // BL: mossy green
+      [80,  30, 110],  // BR: dark purple (near exit)
+    ];
+
+    // ── FRUIT TYPES ──────────────────────────────────────────────────────────
+    const FRUIT_TYPES = [
+      { name:'Apple',      color:'#cc2211', dark:'#881100' },
+      { name:'Orange',     color:'#e87020', dark:'#a04000' },
+      { name:'Watermelon', color:'#22bb44', dark:'#117722' },
+      { name:'Grape',      color:'#9933cc', dark:'#661199' },
+      { name:'Banana',     color:'#ddcc11', dark:'#998800' },
+      { name:'Lemon',      color:'#dddd22', dark:'#999900' },
+    ];
+    const FRUIT_SPAWNS = [
+      [3.5,3.5],[13.5,3.5],[3.5,11.5],[13.5,9.5],[7.5,7.5],[9.5,13.5]
+    ];
+
+    // ── FLOOR ITEMS ──────────────────────────────────────────────────────────
+    const ITEM_DEFS = [
+      // 3 keys
+      { type:'key',    x:5.5,  y:5.5,  label:'Key collected!',      color:'#ffe040', wkey:null },
+      { type:'key',    x:3.5,  y:9.5,  label:'Key collected!',      color:'#ffe040', wkey:null },
+      { type:'key',    x:11.5, y:11.5, label:'Key collected!',      color:'#ffe040', wkey:null },
+      // health
+      { type:'health', x:3.5,  y:7.5,  label:'+30 HP',              color:'#ff4488', wkey:null },
+      { type:'health', x:11.5, y:5.5,  label:'+30 HP',              color:'#ff4488', wkey:null },
+      // weapons
+      { type:'weapon', x:7.5,  y:3.5,  label:'Twin Blades!',        color:'#88ccff', wkey:'twinBlades' },
+      { type:'weapon', x:13.5, y:7.5,  label:'Fire Sword!',         color:'#ff6622', wkey:'fireSword'  },
+      { type:'weapon', x:5.5,  y:13.5, label:'Shuriken!',           color:'#bbbbbb', wkey:'shuriken'  },
+    ];
+
+    // ── STATE ────────────────────────────────────────────────────────────────
+    let p, fruits, items, state, lastT, slashT, keys, notif;
+    const zBuf = new Float32Array(W);
+
+    function init() {
+      overlay.style.display = 'none';
+      doorOpen = false;
+      p = { x:1.5, y:1.5, angle:0, hp:100, score:0, atkCd:0,
+            weapon: WEAPONS.katana, weaponKey:'katana', keyCount:0 };
+      fruits = FRUIT_TYPES.map((type, i) => ({
+        x: FRUIT_SPAWNS[i][0], y: FRUIT_SPAWNS[i][1],
+        type, hp:3, alive:true, spd:0.45+i*0.05, dmgTimer:0
+      }));
+      items = ITEM_DEFS.map(d => ({ ...d, collected:false }));
+      state  = 'play';
+      slashT = 0;
+      keys   = {};
+      notif  = { text:'', timer:0 };
+      lastT  = performance.now();
       updateHUD();
-      draw();
+      requestAnimationFrame(loop);
     }
 
-    function start(){ game.running = true; game.lastTime = performance.now(); loop(game.lastTime); }
-    function stop(){ game.running = false; }
+    // ── INPUT ────────────────────────────────────────────────────────────────
+    window.addEventListener('keydown', e => {
+      keys[e.key] = true;
+      if (e.key === ' ') { e.preventDefault(); doAttack(); }
+      if (e.key === 'm' || e.key === 'M') toggleMusic();
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+    });
+    window.addEventListener('keyup', e => { keys[e.key] = false; });
+    canvas.addEventListener('click', doAttack);
 
-    function spawnItem(){
-      const size = 12;
-      const margin = 20;
-      const x = rand(margin, W-margin-size);
-      const y = rand(margin+40, H-margin-size);
-      game.items.push({x,y,size,angle:0});
+    function doAttack() {
+      if (state !== 'play' || p.atkCd > 0) return;
+      p.atkCd = p.weapon.cd;
+      slashT  = 1.0;
+      const pdx = Math.cos(p.angle), pdy = Math.sin(p.angle);
+      for (const f of fruits) {
+        if (!f.alive) continue;
+        const dx = f.x - p.x, dy = f.y - p.y;
+        const d  = Math.hypot(dx, dy);
+        if (d > p.weapon.range) continue;
+        if ((dx/d)*pdx + (dy/d)*pdy < p.weapon.cone) continue;
+        f.hp -= p.weapon.dmg;
+        if (f.hp <= 0) { f.alive = false; p.score++; }
+        updateHUD();
+      }
     }
 
-    function updateHUD(){
-      scoreEl.textContent = 'Score: ' + game.score;
-      timeEl.textContent = 'Time: ' + Math.max(0, Math.floor(game.time));
-    }
-
-    function update(dt){
-      // player movement (arrow keys or WASD)
+    // ── UPDATE ───────────────────────────────────────────────────────────────
+    function update(dt) {
+      const spd = 3.0 * dt, turn = 2.5 * dt;
+      const c = Math.cos(p.angle), s = Math.sin(p.angle);
       let dx = 0, dy = 0;
-      if (KEYS['arrowleft'] || KEYS['a']) dx -= 1;
-      if (KEYS['arrowright'] || KEYS['d']) dx += 1;
-      if (KEYS['arrowup'] || KEYS['w']) dy -= 1;
-      if (KEYS['arrowdown'] || KEYS['s']) dy += 1;
-      const len = Math.hypot(dx,dy) || 1;
-      game.player.x += (dx/len) * game.player.spd * dt;
-      game.player.y += (dy/len) * game.player.spd * dt;
-      // clamp
-      game.player.x = Math.max(game.player.r, Math.min(W-game.player.r, game.player.x));
-      game.player.y = Math.max(game.player.r, Math.min(H-game.player.r, game.player.y));
+      if (keys['w'] || keys['ArrowUp'])   { dx += c*spd; dy += s*spd; }
+      if (keys['s'] || keys['ArrowDown']) { dx -= c*spd; dy -= s*spd; }
+      if (keys['a'])                       { dx += s*spd; dy -= c*spd; }
+      if (keys['d'])                       { dx -= s*spd; dy += c*spd; }
+      if (keys['ArrowLeft'])  p.angle -= turn;
+      if (keys['ArrowRight']) p.angle += turn;
 
-      // spawn items occasionally
-      game.lastSpawn += dt;
-      if (game.lastSpawn > 1.2){ spawnItem(); game.lastSpawn = 0 }
+      const m = 0.22, nx = p.x+dx, ny = p.y+dy;
+      // Check leading-edge corners in each axis so diagonal wall grazes don't block
+      if (dx > 0 ? (!solid(nx+m,p.y+m) && !solid(nx+m,p.y-m)) : (!solid(nx-m,p.y+m) && !solid(nx-m,p.y-m))) p.x = nx;
+      if (dy > 0 ? (!solid(p.x+m,ny+m) && !solid(p.x-m,ny+m)) : (!solid(p.x+m,ny-m) && !solid(p.x-m,ny-m))) p.y = ny;
 
-      // rotate items
-      for (const it of game.items) it.angle += dt * 3;
+      // Exit check
+      if (tileAt(p.x, p.y) === 2) {
+        state = 'won';
+        showOver('YOU ESCAPED!', `Fruits slain: ${p.score}  |  Keys found: ${p.keyCount}/3\nThe ninja lives to fight another day!`);
+        return;
+      }
 
-      // check collisions
-      for (let i = game.items.length-1; i >= 0; i--){
-        const it = game.items[i];
-        const dist = Math.hypot(it.x - game.player.x, it.y - game.player.y);
-        if (dist < game.player.r + it.size/2){
-          game.items.splice(i,1);
-          game.score += 1;
+      // Item pickup
+      for (const it of items) {
+        if (it.collected) continue;
+        if (Math.hypot(it.x - p.x, it.y - p.y) < 0.6) {
+          it.collected = true;
+          if (it.type === 'key') {
+            p.keyCount++;
+            if (p.keyCount >= 3) { doorOpen = true; pushNotif('Door UNLOCKED! Find the exit!'); }
+            else pushNotif(`Key ${p.keyCount}/3 collected!`);
+          } else if (it.type === 'health') {
+            p.hp = Math.min(100, p.hp + 30);
+            pushNotif('+30 HP');
+          } else if (it.type === 'weapon') {
+            p.weapon    = WEAPONS[it.wkey];
+            p.weaponKey = it.wkey;
+            pushNotif(it.label);
+          }
+          updateHUD();
         }
       }
 
-      // timer
-      game.time -= dt;
-      if (game.time <= 0){ stop(); }
+      // Fruit AI + damage
+      for (const f of fruits) {
+        if (!f.alive) continue;
+        const fx = p.x-f.x, fy = p.y-f.y, fd = Math.hypot(fx,fy);
+        if (fd > 0.01) {
+          const mx2 = (fx/fd)*f.spd*dt, my2 = (fy/fd)*f.spd*dt;
+          if (!solid(f.x+mx2, f.y)) f.x += mx2;
+          if (!solid(f.x, f.y+my2)) f.y += my2;
+        }
+        if (fd < 0.55) {
+          f.dmgTimer -= dt;
+          if (f.dmgTimer <= 0) {
+            p.hp -= 12; f.dmgTimer = 1.2;
+            if (p.hp <= 0) {
+              p.hp = 0; state = 'dead';
+              showOver('YOU DIED', 'The evil fruits were too powerful...\nThe ninja has fallen.');
+            }
+            updateHUD();
+          }
+        }
+      }
 
-      updateHUD();
+      if (p.atkCd > 0) p.atkCd -= dt;
+      if (slashT  > 0) slashT   = Math.max(0, slashT - dt*3);
+      if (notif.timer > 0) notif.timer -= dt;
     }
 
-    function draw(){
-      ctx.clearRect(0,0,W,H);
-      // background grid
-      ctx.fillStyle = '#071028';
-      ctx.fillRect(0,0,W,H);
+    // ── HUD ──────────────────────────────────────────────────────────────────
+    function updateHUD() {
+      const pct = Math.max(0, p.hp);
+      hpFill.style.width      = pct + '%';
+      hpFill.style.background = pct > 50 ? '#e23' : pct > 25 ? '#e92' : '#f00';
+      weaponEl.textContent = 'Weapon: ' + p.weapon.name;
+      keysEl.textContent   = 'Keys: ' + p.keyCount + ' / 3' + (doorOpen ? ' (OPEN)' : '');
+      slainEl.textContent  = 'Slain: ' + p.score;
+      leftEl.textContent   = 'Fruits: ' + fruits.filter(f=>f.alive).length;
+    }
+    function pushNotif(text) { notif.text = text; notif.timer = 2.5; }
 
-      // items
-      for (const it of game.items){
+    function showOver(title, msg) {
+      oTitle.textContent = title; oMsg.textContent = msg;
+      overlay.style.display = 'flex';
+    }
+
+    // ── RAYCASTER ────────────────────────────────────────────────────────────
+    function castWalls() {
+      const cg = ctx.createLinearGradient(0,0,0,H/2);
+      cg.addColorStop(0,'#03000a'); cg.addColorStop(1,'#0f0018');
+      ctx.fillStyle = cg; ctx.fillRect(0,0,W,H/2);
+
+      const fg = ctx.createLinearGradient(0,H/2,0,H);
+      fg.addColorStop(0,'#18110a'); fg.addColorStop(1,'#080500');
+      ctx.fillStyle = fg; ctx.fillRect(0,H/2,W,H/2);
+
+      const dirX = Math.cos(p.angle), dirY = Math.sin(p.angle);
+      const plX  = -dirY * 0.5774,   plY  = dirX * 0.5774;
+
+      for (let col = 0; col < W; col++) {
+        const cx = 2*col/W - 1;
+        const rX = dirX + plX*cx, rY = dirY + plY*cx;
+
+        let mx = Math.floor(p.x), my = Math.floor(p.y);
+        const ddX = Math.abs(1/rX), ddY = Math.abs(1/rY);
+        const stX = rX<0?-1:1, stY = rY<0?-1:1;
+        let sdX = rX<0?(p.x-mx)*ddX:(mx+1-p.x)*ddX;
+        let sdY = rY<0?(p.y-my)*ddY:(my+1-p.y)*ddY;
+
+        let side=0, hitTile=1;
+        for (let step=0; step<32; step++) {
+          if (sdX<sdY) { sdX+=ddX; mx+=stX; side=0; }
+          else         { sdY+=ddY; my+=stY; side=1; }
+          const t = MAP[my]?.[mx];
+          if (t===1 || (t===3 && !doorOpen)) { hitTile=t; break; }
+        }
+
+        const dist = side===0 ? (mx-p.x+(1-stX)/2)/rX : (my-p.y+(1-stY)/2)/rY;
+        zBuf[col] = dist;
+
+        const wallH = Math.min(H, Math.floor(H/dist));
+        const y0    = Math.floor((H-wallH)/2);
+        const br    = Math.min(1, 2.0/dist) * (side ? 0.55 : 1.0);
+
+        if (hitTile === 3) {
+          // Locked door: gold/brown color with stripes
+          const g = Math.floor(140*br), r2 = Math.floor(180*br), b2 = Math.floor(10*br);
+          ctx.fillStyle = `rgb(${r2},${g},${b2})`;
+          ctx.fillRect(col, y0, 1, wallH);
+        } else {
+          // Zone color
+          const zx = mx < 8 ? 0 : 1, zy = my < 8 ? 0 : 1;
+          const [wr,wg,wb] = ZONE_COLORS[zx + zy*2];
+          ctx.fillStyle = `rgb(${Math.floor(wr*br)},${Math.floor(wg*br)},${Math.floor(wb*br)})`;
+          ctx.fillRect(col, y0, 1, wallH);
+        }
+      }
+    }
+
+    // ── SPRITE UTILS ─────────────────────────────────────────────────────────
+    function spriteTransform(sx, sy) {
+      const dirX = Math.cos(p.angle), dirY = Math.sin(p.angle);
+      const plX  = -dirY*0.5774, plY  = dirX*0.5774;
+      const inv  = 1/(plX*dirY - dirX*plY);
+      return {
+        tX: inv*( dirY*sx - dirX*sy),
+        tY: inv*(-plY *sx + plX *sy)
+      };
+    }
+
+    function clipSprite(x0, x1, tY) {
+      ctx.beginPath();
+      for (let x=x0; x<x1; x++) if (zBuf[x]>tY) ctx.rect(x,0,1,H);
+      ctx.clip();
+    }
+
+    // ── DRAW FRUITS ──────────────────────────────────────────────────────────
+    function drawFruits() {
+      const dirX=Math.cos(p.angle), dirY=Math.sin(p.angle);
+      const plX=-dirY*0.5774, plY=dirX*0.5774;
+      const inv=1/(plX*dirY-dirX*plY);
+
+      const visible = fruits.filter(f=>f.alive).map(f=>{
+        const sx=f.x-p.x, sy=f.y-p.y;
+        const tX=inv*(dirY*sx-dirX*sy), tY=inv*(-plY*sx+plX*sy);
+        return {...f,tX,tY};
+      }).filter(f=>f.tY>0.1).sort((a,b)=>b.tY-a.tY);
+
+      for (const f of visible) {
+        const scrX=Math.floor((W/2)*(1+f.tX/f.tY));
+        const sprH=Math.min(H*2,Math.floor(H/f.tY));
+        const x0=Math.max(0,Math.floor(scrX-sprH/2));
+        const x1=Math.min(W,Math.floor(scrX+sprH/2));
+        if (x0>=x1) continue;
+        const cy=H/2, r=sprH/2;
+        const shade=Math.min(1,2.5/f.tY);
+
         ctx.save();
-        ctx.translate(it.x + it.size/2, it.y + it.size/2);
-        ctx.rotate(it.angle);
-        ctx.fillStyle = '#f4c542';
-        ctx.fillRect(-it.size/2, -it.size/2, it.size, it.size);
+        clipSprite(x0,x1,f.tY);
+        ctx.translate(scrX, cy);
+
+        drawFruitBody(f.type.name, r, shade);
+        if (r > 10) drawFruitFace(r);
+
+        ctx.restore();
+
+        // HP dots above sprite (screen space)
+        if (r > 16) {
+          for (let i=0;i<3;i++) {
+            ctx.beginPath(); ctx.arc(scrX+(i-1)*r*0.28, cy-r-9, 4, 0, Math.PI*2);
+            ctx.fillStyle = i<f.hp?'#f44':'#333'; ctx.fill();
+          }
+        }
+      }
+    }
+
+    function drawFruitBody(name, r, s) {  // s = shade 0..1
+      switch(name) {
+        case 'Apple':      fruitApple(r,s);      break;
+        case 'Orange':     fruitOrange(r,s);     break;
+        case 'Watermelon': fruitWatermelon(r,s); break;
+        case 'Grape':      fruitGrape(r,s);      break;
+        case 'Banana':     fruitBanana(r,s);     break;
+        case 'Lemon':      fruitLemon(r,s);      break;
+      }
+    }
+
+    function drawFruitFace(r) {
+      const ey=r*0.115, ex=r*0.24, fy=-r*0.04;
+      // Whites
+      ctx.fillStyle='#fff';
+      ctx.beginPath(); ctx.arc(-ex, fy, ey, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( ex, fy, ey, 0, Math.PI*2); ctx.fill();
+      // Pupils
+      ctx.fillStyle='#111';
+      ctx.beginPath(); ctx.arc(-ex, fy+ey*0.2, ey*0.52, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( ex, fy+ey*0.2, ey*0.52, 0, Math.PI*2); ctx.fill();
+      // Angry brows
+      ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1,r*0.07); ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(-ex-r*0.18, fy-r*0.27); ctx.lineTo(-ex+r*0.05, fy-r*0.16); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo( ex+r*0.18, fy-r*0.27); ctx.lineTo( ex-r*0.05, fy-r*0.16); ctx.stroke();
+      // Frown
+      ctx.beginPath(); ctx.arc(0, fy+r*0.28, r*0.27, 0.15*Math.PI, 0.85*Math.PI);
+      ctx.strokeStyle='#111'; ctx.stroke();
+    }
+
+    // ── Individual fruit shapes (drawn at origin, radius r) ──────────────────
+    function fruitApple(r, s) {
+      // Two-lobe body
+      const g = ctx.createRadialGradient(-r*0.22,-r*0.28,r*0.05, 0,0,r*0.95);
+      g.addColorStop(0, hexShade('#ff8877',s));
+      g.addColorStop(0.55, hexShade('#cc2211',s));
+      g.addColorStop(1, hexShade('#881100',s));
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(-r*0.16, r*0.06, r*0.73, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( r*0.16, r*0.06, r*0.73, 0, Math.PI*2); ctx.fill();
+      // Highlight
+      ctx.beginPath(); ctx.ellipse(-r*0.24,-r*0.32, r*0.17,r*0.09,-0.5,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,255,255,${0.42*s})`; ctx.fill();
+      // Stem
+      ctx.strokeStyle=hexShade('#664422',s); ctx.lineWidth=Math.max(1.5,r*0.08); ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(r*0.03,-r*0.72); ctx.quadraticCurveTo(r*0.22,-r*1.08,r*0.18,-r*1.02); ctx.stroke();
+      // Leaf
+      ctx.fillStyle=hexShade('#33aa22',s);
+      ctx.beginPath(); ctx.ellipse(r*0.26,-r*0.88, r*0.24,r*0.1,-0.45,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=hexShade('#228811',s); ctx.lineWidth=Math.max(0.5,r*0.03);
+      ctx.beginPath(); ctx.moveTo(r*0.08,-r*0.88); ctx.lineTo(r*0.44,-r*0.88); ctx.stroke();
+    }
+
+    function fruitOrange(r, s) {
+      const g = ctx.createRadialGradient(-r*0.2,-r*0.22,r*0.05, 0,0,r*0.95);
+      g.addColorStop(0, hexShade('#ffaa55',s));
+      g.addColorStop(1, hexShade('#cc5500',s));
+      ctx.beginPath(); ctx.arc(0,0,r*0.9,0,Math.PI*2);
+      ctx.fillStyle=g; ctx.fill();
+      // Peel texture — 8 faint dimple rings
+      ctx.strokeStyle=hexShade('#dd7722',s); ctx.lineWidth=Math.max(0.5,r*0.025);
+      for(let i=0;i<8;i++){
+        const a=i*Math.PI/4;
+        ctx.beginPath(); ctx.arc(Math.cos(a)*r*0.52, Math.sin(a)*r*0.52, r*0.09, 0, Math.PI*2); ctx.stroke();
+      }
+      // Nub top
+      ctx.fillStyle=hexShade('#885522',s);
+      ctx.beginPath(); ctx.arc(0,-r*0.87,r*0.11,0,Math.PI*2); ctx.fill();
+      // Highlight
+      ctx.beginPath(); ctx.ellipse(-r*0.2,-r*0.3, r*0.17,r*0.09,-0.5,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,255,255,${0.35*s})`; ctx.fill();
+    }
+
+    function fruitWatermelon(r, s) {
+      // Outer green shell
+      const g = ctx.createRadialGradient(-r*0.2,-r*0.2,r*0.05, 0,0,r);
+      g.addColorStop(0, hexShade('#66ee44',s));
+      g.addColorStop(1, hexShade('#226611',s));
+      ctx.beginPath(); ctx.arc(0,0,r*0.92,0,Math.PI*2);
+      ctx.fillStyle=g; ctx.fill();
+      // Dark green stripes (radiating lines clipped to circle)
+      ctx.save();
+      ctx.beginPath(); ctx.arc(0,0,r*0.92,0,Math.PI*2); ctx.clip();
+      ctx.strokeStyle=hexShade('#115500',s); ctx.lineWidth=Math.max(2,r*0.14);
+      for(let i=0;i<5;i++){
+        ctx.save(); ctx.rotate(i*Math.PI/5);
+        ctx.beginPath(); ctx.moveTo(0,-r*0.95); ctx.lineTo(0,r*0.95); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+      // Thin light-green border ring
+      ctx.beginPath(); ctx.arc(0,0,r*0.92,0,Math.PI*2);
+      ctx.strokeStyle=hexShade('#aaeebb',s); ctx.lineWidth=Math.max(1,r*0.04); ctx.stroke();
+      // Highlight
+      ctx.beginPath(); ctx.ellipse(-r*0.22,-r*0.28, r*0.2,r*0.1,-0.5,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,255,255,${0.28*s})`; ctx.fill();
+    }
+
+    function fruitGrape(r, s) {
+      // Deep purple with glossy sheen
+      const g = ctx.createRadialGradient(-r*0.28,-r*0.3,r*0.04, 0,0,r*0.92);
+      g.addColorStop(0, hexShade('#dd99ff',s));
+      g.addColorStop(0.45, hexShade('#8822bb',s));
+      g.addColorStop(1, hexShade('#440088',s));
+      ctx.beginPath(); ctx.arc(0,0,r*0.88,0,Math.PI*2);
+      ctx.fillStyle=g; ctx.fill();
+      // Large gloss spot
+      ctx.beginPath(); ctx.ellipse(-r*0.27,-r*0.33, r*0.22,r*0.13,-0.5,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,255,255,${0.65*s})`; ctx.fill();
+      // Smaller secondary gloss
+      ctx.beginPath(); ctx.ellipse(-r*0.1,-r*0.5, r*0.1,r*0.05,-0.5,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,255,255,${0.35*s})`; ctx.fill();
+      // Stem
+      ctx.strokeStyle=hexShade('#553311',s); ctx.lineWidth=Math.max(1,r*0.08); ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(0,-r*0.84); ctx.quadraticCurveTo(r*0.18,-r*1.1,r*0.12,-r*1.05); ctx.stroke();
+    }
+
+    function fruitBanana(r, s) {
+      ctx.save();
+      const g = ctx.createLinearGradient(-r*0.8,-r*0.3, r*0.8,r*0.4);
+      g.addColorStop(0, hexShade('#ffee55',s));
+      g.addColorStop(0.5, hexShade('#ddcc00',s));
+      g.addColorStop(1, hexShade('#aa9900',s));
+      // Crescent shape via bezier
+      ctx.beginPath();
+      ctx.moveTo(-r*0.82, r*0.18);
+      ctx.quadraticCurveTo(-r*0.1,-r*1.05, r*0.82, r*0.18);
+      ctx.quadraticCurveTo(r*0.45,  r*0.58, 0,      r*0.48);
+      ctx.quadraticCurveTo(-r*0.45, r*0.58,-r*0.82, r*0.18);
+      ctx.fillStyle=g; ctx.fill();
+      ctx.strokeStyle=hexShade('#998800',s); ctx.lineWidth=Math.max(1,r*0.04); ctx.stroke();
+      // Highlight along top curve
+      ctx.beginPath(); ctx.moveTo(-r*0.55,-r*0.28); ctx.quadraticCurveTo(0,-r*0.75,r*0.55,-r*0.28);
+      ctx.strokeStyle=`rgba(255,255,200,${0.45*s})`; ctx.lineWidth=Math.max(1.5,r*0.09); ctx.stroke();
+      // Dark tips
+      ctx.fillStyle=hexShade('#776600',s);
+      ctx.beginPath(); ctx.arc(-r*0.82,r*0.18,r*0.09,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( r*0.82,r*0.18,r*0.09,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+
+    function fruitLemon(r, s) {
+      const g = ctx.createRadialGradient(-r*0.2,-r*0.2,r*0.05, 0,0,r);
+      g.addColorStop(0, hexShade('#ffff99',s));
+      g.addColorStop(1, hexShade('#ccbb00',s));
+      // Oval body
+      ctx.save(); ctx.scale(1.25, 0.82);
+      ctx.beginPath(); ctx.arc(0,0,r*0.82,0,Math.PI*2);
+      ctx.fillStyle=g; ctx.fill();
+      ctx.restore();
+      // Pointed nubs on each side
+      ctx.fillStyle=hexShade('#bbaa00',s);
+      ctx.beginPath(); ctx.arc(-r*0.96,0,r*0.14,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( r*0.96,0,r*0.14,0,Math.PI*2); ctx.fill();
+      // Surface pore dots
+      ctx.fillStyle=hexShade('#ddcc22',s);
+      const pores=[[-0.3,-0.35],[0.2,-0.4],[-0.45,0.1],[0.38,0.15],[-0.1,0.3],[0.45,-0.15]];
+      for(const [px,py] of pores){ ctx.beginPath(); ctx.arc(px*r,py*r,r*0.05,0,Math.PI*2); ctx.fill(); }
+      // Highlight
+      ctx.beginPath(); ctx.ellipse(-r*0.22,-r*0.28, r*0.2,r*0.09,-0.4,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,255,255,${0.45*s})`; ctx.fill();
+    }
+
+    // ── DRAW ITEMS (floor pickups) ────────────────────────────────────────────
+    function drawItems() {
+      const dirX=Math.cos(p.angle), dirY=Math.sin(p.angle);
+      const plX=-dirY*0.5774, plY=dirX*0.5774;
+      const inv=1/(plX*dirY-dirX*plY);
+      const bob = Math.sin(Date.now()*0.003)*5;
+
+      const visible = items.filter(it=>!it.collected).map(it=>{
+        const sx=it.x-p.x, sy=it.y-p.y;
+        const tX=inv*(dirY*sx-dirX*sy), tY=inv*(-plY*sx+plX*sy);
+        return {...it,tX,tY};
+      }).filter(it=>it.tY>0.1).sort((a,b)=>b.tY-a.tY);
+
+      for (const it of visible) {
+        const scrX=Math.floor((W/2)*(1+it.tX/it.tY));
+        const sprH=Math.min(H*2,Math.floor(H/it.tY));
+        const sz=sprH*0.35; // items are smaller than fruits
+        const x0=Math.max(0,Math.floor(scrX-sz));
+        const x1=Math.min(W,Math.floor(scrX+sz));
+        if (x0>=x1) continue;
+        // Shift down so item sits on floor (lower than eye height)
+        const cy = H/2 + sprH*0.18 + bob*(sprH/H);
+        const shade=Math.min(1,3/it.tY);
+
+        ctx.save();
+        clipSprite(x0,x1,it.tY);
+
+        const col = hexShade(it.color, shade);
+
+        if (it.type==='key') {
+          // Key: circle with cross
+          ctx.beginPath(); ctx.arc(scrX, cy, sz*0.55, 0, Math.PI*2);
+          ctx.fillStyle=col; ctx.fill();
+          ctx.strokeStyle='#000'; ctx.lineWidth=Math.max(1,sz*0.08); ctx.stroke();
+          // Key teeth
+          ctx.fillStyle='#000';
+          ctx.fillRect(scrX+sz*0.2, cy-sz*0.1, sz*0.4, sz*0.12);
+          ctx.fillRect(scrX+sz*0.35, cy+sz*0.02, sz*0.12, sz*0.18);
+          // Glow
+          ctx.beginPath(); ctx.arc(scrX,cy,sz*0.65,0,Math.PI*2);
+          ctx.strokeStyle='rgba(255,220,0,0.5)'; ctx.lineWidth=Math.max(2,sz*0.2); ctx.stroke();
+        } else if (it.type==='health') {
+          // Heart / cross
+          const s=sz*0.5;
+          ctx.fillStyle=col;
+          ctx.fillRect(scrX-s*0.35, cy-s, s*0.7, s*2);
+          ctx.fillRect(scrX-s, cy-s*0.35, s*2, s*0.7);
+          // Glow
+          ctx.beginPath(); ctx.arc(scrX,cy,sz*0.6,0,Math.PI*2);
+          ctx.strokeStyle='rgba(255,80,150,0.4)'; ctx.lineWidth=Math.max(2,sz*0.15); ctx.stroke();
+        } else {
+          // Weapon: diamond shape
+          ctx.beginPath();
+          ctx.moveTo(scrX, cy-sz); ctx.lineTo(scrX+sz*0.55, cy);
+          ctx.lineTo(scrX, cy+sz); ctx.lineTo(scrX-sz*0.55, cy);
+          ctx.closePath();
+          ctx.fillStyle=col; ctx.fill();
+          ctx.strokeStyle='#000'; ctx.lineWidth=Math.max(1,sz*0.07); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(scrX, cy-sz); ctx.lineTo(scrX+sz*0.55, cy);
+          ctx.lineTo(scrX, cy+sz); ctx.lineTo(scrX-sz*0.55, cy);
+          ctx.closePath();
+          ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=Math.max(2,sz*0.18); ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+    }
+
+    function hexShade(hex, s) {
+      return `rgb(${Math.floor(parseInt(hex.slice(1,3),16)*s)},${Math.floor(parseInt(hex.slice(3,5),16)*s)},${Math.floor(parseInt(hex.slice(5,7),16)*s)})`;
+    }
+
+    // ── WEAPON RENDER ─────────────────────────────────────────────────────────
+    function drawWeapon() {
+      const wk = p.weaponKey;
+      if (wk === 'shuriken') { drawShuriken(); return; }
+
+      ctx.save();
+      const swing = slashT * 1.5 - 0.4;
+      ctx.translate(W*0.73, H*0.83);
+      ctx.rotate(0.35 - swing);
+      ctx.globalAlpha = 0.93;
+
+      // Blade color by weapon
+      let topCol = '#e8eaf0', botCol = '#778';
+      if (wk==='twinBlades') { topCol='#aaddff'; botCol='#336699'; }
+      if (wk==='fireSword')  { topCol='#ffaa44'; botCol='#cc3300'; }
+
+      const bg = ctx.createLinearGradient(0,-H*0.33,0,0);
+      bg.addColorStop(0,topCol); bg.addColorStop(1,botCol);
+      ctx.fillStyle=bg; ctx.fillRect(-4,-H*0.33,8,H*0.33);
+
+      if (wk==='fireSword' && slashT>0.2) {
+        // Flame particles on blade
+        ctx.save();
+        for (let i=0;i<5;i++) {
+          const fy=-H*0.1-i*H*0.05;
+          const fr=(Math.sin(Date.now()*0.01+i)*3);
+          ctx.beginPath(); ctx.arc(fr,fy,3+i*0.5,0,Math.PI*2);
+          ctx.fillStyle=`rgba(255,${100+i*20},0,${0.6-i*0.1})`; ctx.fill();
+        }
         ctx.restore();
       }
 
-      // player
-      ctx.beginPath();
-      ctx.fillStyle = '#66e0a3';
-      ctx.arc(game.player.x, game.player.y, game.player.r, 0, Math.PI*2);
-      ctx.fill();
+      // Twin blades: second blade
+      if (wk==='twinBlades') {
+        ctx.save(); ctx.translate(12,5);
+        const bg2=ctx.createLinearGradient(0,-H*0.28,0,0);
+        bg2.addColorStop(0,'#aaddff'); bg2.addColorStop(1,'#336699');
+        ctx.fillStyle=bg2; ctx.fillRect(-3,-H*0.28,6,H*0.28);
+        ctx.restore();
+      }
 
-      // simple instructions
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(8,8,200,36);
-      ctx.fillStyle = '#ddd';
-      ctx.font = '12px sans-serif';
-      ctx.fillText('Move: arrows / WASD — collect squares', 14, 30);
+      ctx.beginPath(); ctx.moveTo(-4,-H*0.33); ctx.lineTo(0,-H*0.37); ctx.lineTo(4,-H*0.33);
+      ctx.fillStyle=topCol; ctx.fill();
+      ctx.fillStyle='#776644'; ctx.fillRect(-15,-3,30,10);
+      ctx.fillStyle='#221100'; ctx.fillRect(-5,7,10,H*0.09);
+      ctx.strokeStyle='#554422'; ctx.lineWidth=2;
+      for (let i=0;i<4;i++) { ctx.beginPath(); ctx.moveTo(-5,10+i*7); ctx.lineTo(5,10+i*7); ctx.stroke(); }
 
-      if (!game.running){
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(0, H/2-40, W, 80);
-        ctx.fillStyle = '#fff';
-        ctx.font = '28px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Press Start to play', W/2, H/2+8);
-        ctx.textAlign = 'left';
+      ctx.restore();
+
+      if (slashT>0.3) {
+        ctx.save();
+        ctx.globalAlpha=(slashT-0.3)*0.65;
+        ctx.strokeStyle = wk==='fireSword'?'#ff8844':'#fff';
+        ctx.lineWidth=3; ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(W*0.38,H*0.32); ctx.quadraticCurveTo(W*0.62,H*0.5,W*0.88,H*0.68); ctx.stroke();
+        ctx.restore();
       }
     }
 
-    function loop(now){
-      if (!game.running) return draw();
-      const dt = (now - game.lastTime) / 1000;
-      game.lastTime = now;
-      update(dt);
-      draw();
-      if (game.running) requestAnimationFrame(loop);
-      else draw();
+    function drawShuriken() {
+      ctx.save();
+      const spin = (Date.now()*0.008) * (slashT>0?3:1);
+      ctx.translate(W*0.75, H*0.78);
+      ctx.rotate(spin);
+      ctx.globalAlpha=0.92;
+      const r=28;
+      ctx.fillStyle='#bbb';
+      for (let i=0;i<4;i++) {
+        ctx.save(); ctx.rotate(i*Math.PI/2);
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(r*0.4,r*0.2); ctx.lineTo(r,0); ctx.lineTo(r*0.4,-r*0.2); ctx.closePath();
+        ctx.fill(); ctx.restore();
+      }
+      ctx.beginPath(); ctx.arc(0,0,r*0.2,0,Math.PI*2);
+      ctx.fillStyle='#333'; ctx.fill();
+      ctx.restore();
+
+      if (slashT>0.3) {
+        ctx.save();
+        ctx.globalAlpha=(slashT-0.3)*0.8;
+        ctx.strokeStyle='#ccc'; ctx.lineWidth=2; ctx.setLineDash([4,4]);
+        ctx.beginPath(); ctx.moveTo(W*0.5,H*0.5); ctx.lineTo(W*0.5,H*0.1);
+        ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+      }
     }
 
-    startBtn.addEventListener('click', ()=>{
-      reset();
-      start();
-    });
-    restartBtn.addEventListener('click', ()=>{
-      reset();
-      start();
-    });
+    // ── MINIMAP ──────────────────────────────────────────────────────────────
+    function drawMinimap() {
+      const sc=7, ox=W-MW*sc-6, oy=6;
+      ctx.globalAlpha=0.72;
+      for (let my=0;my<MH;my++) {
+        for (let mx=0;mx<MW;mx++) {
+          const t=MAP[my][mx];
+          ctx.fillStyle = t===1?'#444' : t===2?'#00ff55' : t===3?(doorOpen?'#555':'#c8a000') : '#111';
+          ctx.fillRect(ox+mx*sc, oy+my*sc, sc-1, sc-1);
+        }
+      }
+      for (const it of items) {
+        if (it.collected) continue;
+        ctx.fillStyle = it.color;
+        ctx.fillRect(ox+it.x*sc-2, oy+it.y*sc-2, 4, 4);
+      }
+      for (const f of fruits) {
+        if (!f.alive) continue;
+        ctx.fillStyle=f.type.color;
+        ctx.fillRect(ox+f.x*sc-2, oy+f.y*sc-2, 4, 4);
+      }
+      ctx.fillStyle='#f22';
+      ctx.fillRect(ox+p.x*sc-2, oy+p.y*sc-2, 4, 4);
+      ctx.strokeStyle='#f22'; ctx.lineWidth=1.5;
+      ctx.beginPath();
+      ctx.moveTo(ox+p.x*sc, oy+p.y*sc);
+      ctx.lineTo(ox+(p.x+Math.cos(p.angle)*1.5)*sc, oy+(p.y+Math.sin(p.angle)*1.5)*sc);
+      ctx.stroke();
+      ctx.globalAlpha=1;
+    }
 
-    // initial
-    reset();
-    draw();
+    // ── NOTIFICATION ─────────────────────────────────────────────────────────
+    function drawNotif() {
+      if (notif.timer<=0) return;
+      const alpha=Math.min(1, notif.timer*1.5);
+      ctx.save();
+      ctx.globalAlpha=alpha;
+      ctx.font='bold 20px Arial';
+      ctx.textAlign='center';
+      ctx.fillStyle='#fff';
+      ctx.shadowColor='#000'; ctx.shadowBlur=8;
+      ctx.fillText(notif.text, W/2, H*0.76);
+      ctx.restore();
+    }
+
+    // ── EXIT GLOW ────────────────────────────────────────────────────────────
+    function drawExitGlow() {
+      const d=Math.hypot(p.x-14.5, p.y-14.5);
+      if (d<6) {
+        const alpha=(1-d/6)*0.10*(0.6+0.4*Math.sin(Date.now()*0.005));
+        ctx.save(); ctx.globalAlpha=alpha;
+        ctx.fillStyle=doorOpen?'#00ff55':'#ffaa00';
+        ctx.fillRect(0,0,W,H);
+        ctx.restore();
+      }
+    }
+
+    // ── MUSIC  (Theory of Everything — DJ-Nate / GD, synthesized via Web Audio) ──
+    const BPM      = 190;
+    const SN       = 60 / BPM / 4;   // one sixteenth-note in seconds
+    // Frequencies
+    const _=0,
+      A2=110,  E3=165,  G2=98,   C3=131,  D3=147,  B2=123,
+      A3=220,  B3=247,  C4=262,  D4=294,  E4=330,  F4=349,  G4=392,
+      A4=440,  B4=494,  C5=523,  D5=587,  E5=659,  F5=698,  G5=784,
+      A5=880,  B5=988,  C6=1047, D6=1175, E6=1319;
+
+    // ── Lead melody (main ToE theme — each entry [freq, 16th-note count]) ───
+    const LEAD = [
+      // Phrase 1
+      [E5,2],[_,1],[E5,1],[G5,2],[A5,2],[_,2],[G5,1],[_,1],[E5,2],[D5,2],[E5,4],
+      // Phrase 2
+      [C5,2],[_,1],[C5,1],[E5,2],[G5,2],[_,2],[A5,1],[_,1],[G5,2],[E5,2],[D5,4],
+      // Phrase 3 – rising
+      [B4,1],[C5,1],[D5,1],[E5,1],[G5,2],[_,2],[A5,1],[_,1],[G5,2],[E5,2],[D5,2],[_,2],
+      // Phrase 4 – hook
+      [E5,2],[D5,2],[E5,2],[G5,2],[A5,4],[_,4],
+      // Phrase 5 – upper register
+      [A5,2],[_,1],[A5,1],[B5,2],[C6,2],[_,2],[B5,1],[_,1],[A5,2],[G5,2],[E5,4],
+      // Phrase 6
+      [G5,2],[_,1],[G5,1],[A5,2],[B5,2],[_,2],[A5,1],[_,1],[G5,2],[E5,2],[D5,4],
+      // Phrase 7 – climax
+      [E5,1],[G5,1],[A5,1],[B5,1],[C6,2],[_,2],[B5,1],[A5,1],[G5,2],[A5,2],[_,2],
+      // Phrase 8 – resolve
+      [E5,2],[D5,2],[C5,2],[B4,2],[A4,4],[_,4],
+    ];
+
+    // ── Punchy bass line ─────────────────────────────────────────────────────
+    const BASS = [
+      [A2,4],[E3,4],[C3,4],[E3,4],
+      [A2,4],[E3,4],[G2,4],[D3,4],
+      [A2,4],[E3,4],[C3,4],[E3,4],
+      [A2,4],[E3,4],[G2,4],[D3,4],
+      [A2,4],[E3,4],[C3,4],[E3,4],
+      [A2,4],[E3,4],[G2,4],[D3,4],
+      [A2,4],[E3,4],[C3,4],[B2,4],
+      [A2,8],[A2,8],
+    ];
+
+    // ── Rhythmic pulse (kick pattern) ────────────────────────────────────────
+    const KICK_PAT = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0]; // 1 = hit
+
+    let audioCtx = null, masterGain = null;
+    let musicOn = false, schedAt = 0;
+    let leadIdx = 0, bassIdx = 0, beatCount = 0;
+    let schedTimer = null;
+
+    function ensureAudio() {
+      if (audioCtx) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+      schedAt = audioCtx.currentTime + 0.05;
+    }
+
+    function playOsc(freq, start, dur, type, gainVal, detune=0) {
+      if (!freq) return;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type;
+      o.frequency.value = freq;
+      o.detune.value = detune;
+      g.gain.setValueAtTime(gainVal, start);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + dur * 0.92);
+      o.connect(g); g.connect(masterGain);
+      o.start(start); o.stop(start + dur);
+    }
+
+    function playKick(start) {
+      // Sine sweep from 120→40 Hz = punchy kick
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(120, start);
+      o.frequency.exponentialRampToValueAtTime(40, start + 0.12);
+      g.gain.setValueAtTime(0.5, start);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.15);
+      o.connect(g); g.connect(masterGain);
+      o.start(start); o.stop(start + 0.2);
+    }
+
+    function scheduleMusic() {
+      if (!musicOn || !audioCtx) return;
+      const LOOKAHEAD = 0.25; // seconds to schedule ahead
+      while (schedAt < audioCtx.currentTime + LOOKAHEAD) {
+        // Lead note
+        const [lf, ld] = LEAD[leadIdx % LEAD.length];
+        const dur = ld * SN;
+        playOsc(lf, schedAt, dur, 'square', 0.12);
+        // Slight detune second square for thickness
+        playOsc(lf, schedAt, dur, 'square', 0.06, 7);
+
+        // Bass (each bass note lasts 4 sixteenths)
+        if (beatCount % 4 === 0) {
+          const [bf, bd] = BASS[bassIdx % BASS.length];
+          playOsc(bf, schedAt, bd * SN, 'sawtooth', 0.22);
+          bassIdx++;
+        }
+
+        // Kick drum every quarter note
+        if (KICK_PAT[beatCount % KICK_PAT.length]) playKick(schedAt);
+
+        // Hi-hat every 16th
+        playOsc(8000, schedAt, SN * 0.3, 'square', 0.015);
+
+        schedAt += dur;
+        leadIdx++;
+        beatCount++;
+        if (leadIdx >= LEAD.length) { leadIdx = 0; bassIdx = 0; beatCount = 0; }
+      }
+      schedTimer = setTimeout(scheduleMusic, 100);
+    }
+
+    function toggleMusic() {
+      ensureAudio();
+      musicOn = !musicOn;
+      if (musicOn) {
+        schedAt = audioCtx.currentTime + 0.05;
+        leadIdx = 0; bassIdx = 0; beatCount = 0;
+        scheduleMusic();
+        pushNotif('Music ON');
+      } else {
+        clearTimeout(schedTimer);
+        pushNotif('Music OFF');
+      }
+    }
+
+    function startMusic() {
+      ensureAudio();
+      if (!musicOn) toggleMusic();
+    }
+
+    // ── LOOP ─────────────────────────────────────────────────────────────────
+    function loop(now) {
+      if (state!=='play') return;
+      const dt=Math.min((now-lastT)/1000, 0.05);
+      lastT=now;
+      update(dt);
+      if (state!=='play') return;
+      castWalls();
+      drawFruits();
+      drawItems();
+      drawWeapon();
+      drawExitGlow();
+      drawMinimap();
+      drawNotif();
+      requestAnimationFrame(loop);
+    }
+
+    document.getElementById('oBtn').addEventListener('click', () => { init(); startMusic(); });
+    // First click on canvas also starts music (browser requires user gesture)
+    canvas.addEventListener('click', () => { if (!musicOn) startMusic(); }, { once: true });
+    init();
   </script>
 </body>
 </html>
