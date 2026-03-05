@@ -132,7 +132,7 @@
     ];
 
     // ── STATE ────────────────────────────────────────────────────────────────
-    let p, fruits, items, state, lastT, slashT, keys, notif;
+    let p, fruits, items, traps, lavas, state, lastT, slashT, keys, notif;
     const zBuf = new Float32Array(W);
 
     function init() {
@@ -145,6 +145,20 @@
         type, hp:3, alive:true, spd:0.45+i*0.05, dmgTimer:0
       }));
       items = ITEM_DEFS.map(d => ({ ...d, collected:false }));
+      // Spike traps — staggered start timers so they don't all fire at once
+      traps = [
+        { x:3.5,  y:5.5,  state:'dormant', timer:0.0 },
+        { x:7.5,  y:5.5,  state:'dormant', timer:1.5 },
+        { x:11.5, y:7.5,  state:'dormant', timer:0.9 },
+        { x:5.5,  y:9.5,  state:'dormant', timer:2.2 },
+        { x:9.5,  y:11.5, state:'dormant', timer:1.1 },
+      ];
+      // Lava pools — permanent floor hazards
+      lavas = [
+        { x:9.5,  y:3.5  },
+        { x:5.5,  y:7.5  },
+        { x:13.5, y:11.5 },
+      ];
       state  = 'play';
       slashT = 0;
       keys   = {};
@@ -245,6 +259,29 @@
             }
             updateHUD();
           }
+        }
+      }
+
+      // ── Spike trap logic ─────────────────────────────────────────────────
+      for (const t of traps) {
+        t.timer -= dt;
+        if (t.timer <= 0) {
+          if      (t.state === 'dormant') { t.state = 'warning'; t.timer = 0.65; }
+          else if (t.state === 'warning') { t.state = 'active';  t.timer = 1.1;  }
+          else                            { t.state = 'dormant'; t.timer = 2.8;  }
+        }
+        if (t.state === 'active' && Math.hypot(t.x-p.x, t.y-p.y) < 0.5) {
+          p.hp -= 35*dt;
+          if (p.hp <= 0) { p.hp=0; state='dead'; showOver('YOU DIED','A spike trap impaled you!\nThe ninja has fallen.'); }
+          updateHUD();
+        }
+      }
+      // ── Lava damage ──────────────────────────────────────────────────────
+      for (const lv of lavas) {
+        if (Math.hypot(lv.x-p.x, lv.y-p.y) < 0.48) {
+          p.hp -= 22*dt;
+          if (p.hp <= 0) { p.hp=0; state='dead'; showOver('YOU DIED','You melted in lava!\nThe ninja has fallen.'); }
+          updateHUD();
         }
       }
 
@@ -748,6 +785,106 @@
       ctx.restore();
     }
 
+    // ── DRAW TRAPS ───────────────────────────────────────────────────────────
+    function drawTraps() {
+      const dirX=Math.cos(p.angle), dirY=Math.sin(p.angle);
+      const plX=-dirY*0.5774, plY=dirX*0.5774;
+      const inv=1/(plX*dirY-dirX*plY);
+      const now=Date.now();
+
+      const all = [
+        ...traps.map(t  => ({...t,  kind:'spike'})),
+        ...lavas.map(lv => ({...lv, kind:'lava', state:'active', timer:0})),
+      ];
+
+      const visible = all.map(t => {
+        const sx=t.x-p.x, sy=t.y-p.y;
+        const tX=inv*(dirY*sx-dirX*sy), tY=inv*(-plY*sx+plX*sy);
+        return {...t,tX,tY};
+      }).filter(t=>t.tY>0.1).sort((a,b)=>b.tY-a.tY);
+
+      for (const t of visible) {
+        const scrX = Math.floor((W/2)*(1+t.tX/t.tY));
+        const sprH = Math.min(H*2, Math.floor(H/t.tY));
+        const sz   = sprH * 0.42;
+        // Push down so trap sits on the floor
+        const cy   = H/2 + sprH * 0.30;
+        const x0   = Math.max(0, Math.floor(scrX-sz));
+        const x1   = Math.min(W, Math.floor(scrX+sz));
+        if (x0 >= x1) continue;
+        const shade = Math.min(1, 2.5/t.tY);
+
+        ctx.save();
+        clipSprite(x0, x1, t.tY);
+        ctx.translate(scrX, cy);
+
+        if (t.kind === 'lava') {
+          const flicker = 0.72 + 0.28*Math.sin(now*0.009);
+          // Outer heat haze
+          ctx.beginPath(); ctx.ellipse(0,0, sz*1.15,sz*0.38, 0,0,Math.PI*2);
+          ctx.fillStyle=`rgba(255,80,0,${0.28*shade*flicker})`; ctx.fill();
+          // Pool gradient
+          const lg=ctx.createRadialGradient(0,0,sz*0.05, 0,0,sz*0.9);
+          lg.addColorStop(0,   hexShade('#ffff44',shade*flicker));
+          lg.addColorStop(0.4, hexShade('#ff5500',shade));
+          lg.addColorStop(1,   hexShade('#881100',shade));
+          ctx.beginPath(); ctx.ellipse(0,0, sz*0.9,sz*0.28, 0,0,Math.PI*2);
+          ctx.fillStyle=lg; ctx.fill();
+          // Bubbles
+          ctx.fillStyle=hexShade('#ffcc00',shade*flicker);
+          for (const [bx,by] of [[-0.32,-0.06],[0.2,0.07],[-0.05,-0.09],[0.48,0],[-0.52,0.05]]) {
+            ctx.beginPath(); ctx.arc(bx*sz,by*sz, sz*0.07,0,Math.PI*2); ctx.fill();
+          }
+        } else {
+          if (t.state === 'dormant') {
+            // Grey metal plate
+            ctx.beginPath(); ctx.ellipse(0,0, sz*0.88,sz*0.26, 0,0,Math.PI*2);
+            ctx.fillStyle=hexShade('#555',shade); ctx.fill();
+            ctx.strokeStyle=hexShade('#888',shade); ctx.lineWidth=Math.max(1,sz*0.05); ctx.stroke();
+            // Cross grooves
+            ctx.strokeStyle=hexShade('#444',shade); ctx.lineWidth=Math.max(0.5,sz*0.03);
+            ctx.beginPath(); ctx.moveTo(-sz*0.65,0); ctx.lineTo(sz*0.65,0); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0,-sz*0.2); ctx.lineTo(0,sz*0.2); ctx.stroke();
+          } else if (t.state === 'warning') {
+            const pulse = 0.5+0.5*Math.sin(now*0.018);
+            // Glowing danger plate
+            ctx.beginPath(); ctx.ellipse(0,0, sz*0.88,sz*0.26, 0,0,Math.PI*2);
+            ctx.fillStyle=`rgba(255,${Math.floor(80+120*pulse)},0,${shade})`; ctx.fill();
+            ctx.beginPath(); ctx.ellipse(0,0, sz*1.1,sz*0.38, 0,0,Math.PI*2);
+            ctx.strokeStyle=`rgba(255,160,0,${0.55*shade*pulse})`;
+            ctx.lineWidth=Math.max(2,sz*0.12); ctx.stroke();
+            // Warning triangles
+            ctx.fillStyle=`rgba(255,255,0,${shade*0.9})`;
+            for (const ox of [-sz*0.35, 0, sz*0.35]) {
+              ctx.beginPath(); ctx.moveTo(ox,-sz*0.22); ctx.lineTo(ox-sz*0.14,sz*0.05); ctx.lineTo(ox+sz*0.14,sz*0.05); ctx.closePath(); ctx.fill();
+            }
+          } else { // active
+            // Base plate
+            ctx.beginPath(); ctx.ellipse(0,0, sz*0.88,sz*0.24, 0,0,Math.PI*2);
+            ctx.fillStyle=hexShade('#2a2a2a',shade); ctx.fill();
+            // Blood glow ring
+            ctx.beginPath(); ctx.ellipse(0,0, sz*1.0,sz*0.32, 0,0,Math.PI*2);
+            ctx.strokeStyle=`rgba(255,0,0,${0.55*shade})`; ctx.lineWidth=Math.max(2,sz*0.1); ctx.stroke();
+            // Metal spikes
+            const nSpikes=5;
+            for (let i=0; i<nSpikes; i++) {
+              const sx2 = (i-(nSpikes-1)/2)*sz*0.32;
+              // Spike shaft
+              ctx.beginPath(); ctx.moveTo(sx2-sz*0.07,0); ctx.lineTo(sx2+sz*0.07,0); ctx.lineTo(sx2,-sz*0.72); ctx.closePath();
+              const sg=ctx.createLinearGradient(sx2,-sz*0.72,sx2+sz*0.07,0);
+              sg.addColorStop(0, hexShade('#eeeeee',shade));
+              sg.addColorStop(1, hexShade('#666666',shade));
+              ctx.fillStyle=sg; ctx.fill();
+              // Blood tip
+              ctx.beginPath(); ctx.arc(sx2,-sz*0.72, sz*0.05, 0, Math.PI*2);
+              ctx.fillStyle=`rgba(200,0,0,${shade})`; ctx.fill();
+            }
+          }
+        }
+        ctx.restore();
+      }
+    }
+
     // ── EXIT GLOW ────────────────────────────────────────────────────────────
     function drawExitGlow() {
       const d=Math.hypot(p.x-14.5, p.y-14.5);
@@ -904,6 +1041,7 @@
       update(dt);
       if (state!=='play') return;
       castWalls();
+      drawTraps();
       drawFruits();
       drawItems();
       drawWeapon();
